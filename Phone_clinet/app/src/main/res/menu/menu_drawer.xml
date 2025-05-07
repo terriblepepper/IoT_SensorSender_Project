@@ -1,0 +1,6 @@
+<!-- app/src/main/res/menu/menu_drawer.xml -->
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@+id/nav_info_panel" android:title="信息面板" />
+    <item android:id="@+id/nav_sensors" android:title="支持的传感器" />
+    <item android:id="@+id/nav_server" android:title="服务器连接" />
+</menu>
