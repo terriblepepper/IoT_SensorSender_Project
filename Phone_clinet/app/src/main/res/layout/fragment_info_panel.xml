@@ -14,9 +14,4 @@
         android:layout_height="wrap_content"
         android:text="实时传感器数据" />
 
-    <TextView
-        android:id="@+id/tv_server_status"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="服务器连接状态" />
 </LinearLayout>

@@ -9,6 +9,13 @@
     <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/leaflet@1.7.1/dist/leaflet.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.7.1/dist/leaflet.css" />
+    <style>
+        /* 简单的样式，确保图表和地图容器有尺寸 */
+        .container { margin: 20px; }
+        #map { height: 400px; margin-bottom: 20px; }
+        canvas { max-width: 100%; margin-bottom: 20px; }
+        .controls button { margin-right: 10px; padding: 8px 12px; }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -17,7 +24,7 @@
         <!-- 按钮区 -->
         <div class="controls">
             <button id="pauseResumeBtn">暂停实时更新</button>
-            <button id="exportDataBtn">导出数据</button>
+            <button id="exportDataBtn">导出数据 (CSV)</button>
         </div>
 
         <!-- 光强图 -->
@@ -28,9 +35,9 @@
         <h2>加速度传感器数据 (单位: m/s²)</h2>
         <canvas id="accelerometerChart"></canvas>
 
-        <!-- 陀螺仪图 -->
-        <h2>陀螺仪数据 (单位: °/s)</h2>
-        <canvas id="gyroscopeChart"></canvas>
+        <!-- 方向传感器图 -->
+        <h2>方向传感器数据 (单位: °)</h2>
+        <canvas id="orientationChart"></canvas>
 
         <!-- 地图 -->
         <h2>地理位置地图</h2>
@@ -39,9 +46,19 @@
 
     <script>
         // 初始化变量
-        const socket = io();
+        const socket = io(); // 默认连接到提供此页面的服务器和端口
         let isPaused = false; // 实时更新状态
         const dataHistory = []; // 存储数据历史记录
+        const MAX_DATA_POINTS = 100; // 图表上显示的最大数据点数量
+
+        function trimChartData(chart) {
+            if (chart.data.labels.length > MAX_DATA_POINTS) {
+                chart.data.labels.shift();
+                chart.data.datasets.forEach(dataset => {
+                    dataset.data.shift();
+                });
+            }
+        }
 
         // 图表配置
         const lightChart = new Chart(document.getElementById("lightChart"), {
@@ -53,9 +70,10 @@
                     data: [],
                     borderColor: "rgb(255, 99, 132)",
                     fill: false,
+                    tension: 0.1
                 }]
             },
-            options: { responsive: true }
+            options: { responsive: true, animation: false }
         });
 
         const accelerometerChart = new Chart(document.getElementById("accelerometerChart"), {
@@ -63,42 +81,45 @@
             data: {
                 labels: [],
                 datasets: [
-                    { label: "X轴加速度", data: [], borderColor: "rgb(75, 192, 192)", fill: false },
-                    { label: "Y轴加速度", data: [], borderColor: "rgb(54, 162, 235)", fill: false },
-                    { label: "Z轴加速度", data: [], borderColor: "rgb(153, 102, 255)", fill: false },
+                    { label: "X轴加速度", data: [], borderColor: "rgb(75, 192, 192)", fill: false, tension: 0.1 },
+                    { label: "Y轴加速度", data: [], borderColor: "rgb(54, 162, 235)", fill: false, tension: 0.1 },
+                    { label: "Z轴加速度", data: [], borderColor: "rgb(153, 102, 255)", fill: false, tension: 0.1 },
                 ]
             },
-            options: { responsive: true }
+            options: { responsive: true, animation: false }
         });
 
-        const gyroscopeChart = new Chart(document.getElementById("gyroscopeChart"), {
+        const orientationChart = new Chart(document.getElementById("orientationChart"), {
             type: "line",
             data: {
                 labels: [],
                 datasets: [
-                    { label: "X轴角速度", data: [], borderColor: "rgb(255, 206, 86)", fill: false },
-                    { label: "Y轴角速度", data: [], borderColor: "rgb(255, 159, 64)", fill: false },
-                    { label: "Z轴角速度", data: [], borderColor: "rgb(201, 203, 207)", fill: false },
+                    { label: "方位角 (Azimuth)", data: [], borderColor: "rgb(255, 159, 64)", fill: false, tension: 0.1 }, // 橙色
+                    { label: "俯仰角 (Pitch)", data: [], borderColor: "rgb(46, 204, 113)", fill: false, tension: 0.1 },  // 绿色
+                    { label: "滚转角 (Roll)", data: [], borderColor: "rgb(142, 68, 173)", fill: false, tension: 0.1 },   // 紫色
                 ]
             },
-            options: { responsive: true }
+            options: { responsive: true, animation: false }
         });
 
         // 地图配置
-        const map = L.map("map").setView([30.0, 120.0], 10); // 默认中心坐标
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+        const map = L.map("map").setView([30.0, 120.0], 13); // 默认中心坐标和缩放级别
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+             attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
         const pathLayer = L.polyline([], { color: "blue" }).addTo(map); // 路径层
-        const geoFence = L.circle([30.0, 120.0], { radius: 1000, color: "red" }).addTo(map); // 地理围栏
+        let currentMarker = null; // 当前位置标记
 
         // 实时数据更新处理
         socket.on("update", (data) => {
-            if (isPaused) return; // 如果暂停，则不更新
+            if (isPaused) return;
 
-            // 更新图表
-            const timestamp = data.Timestamp;
-            if (data.Light) {
+            const timestamp = data.Timestamp.split(' ')[1]; // 只取时间部分用于图表标签
+
+            if (data.Light !== null && data.Light !== undefined) {
                 lightChart.data.labels.push(timestamp);
                 lightChart.data.datasets[0].data.push(data.Light);
+                trimChartData(lightChart);
                 lightChart.update();
             }
             if (data.Accelerometer) {
@@ -106,26 +127,49 @@
                 accelerometerChart.data.datasets.forEach((dataset, i) => {
                     dataset.data.push(data.Accelerometer[i]);
                 });
+                trimChartData(accelerometerChart);
                 accelerometerChart.update();
             }
-            if (data.Gyroscope) {
-                gyroscopeChart.data.labels.push(timestamp);
-                gyroscopeChart.data.datasets.forEach((dataset, i) => {
-                    dataset.data.push(data.Gyroscope[i]);
+            if (data.Orientation) {
+                orientationChart.data.labels.push(timestamp);
+                orientationChart.data.datasets.forEach((dataset, i) => {
+                    dataset.data.push(data.Orientation[i]);
                 });
-                gyroscopeChart.update();
+                trimChartData(orientationChart);
+                orientationChart.update();
             }
 
-            // 更新地图
-            if (data.Location) {
-                const [longitude, latitude] = data.Location;
-                const latLng = [latitude, longitude];
-                pathLayer.addLatLng(latLng);
-                map.setView(latLng, map.getZoom());
+            // 更新地图 (Location: [latitude, longitude])
+            if (data.Location && data.Location.length === 2 && data.Location[0] !== null && data.Location[1] !== null) {
+                const latitude = data.Location[0];
+                const longitude = data.Location[1];
+                // 检查经纬度是否是特殊错误值 (比如服务无法获取位置时我们约定的 -1, -2, -3)
+                if (latitude > -90 && latitude < 90 && longitude > -180 && longitude < 180 &&
+                    !(latitude === -1.0 && longitude === -1.0) &&
+                    !(latitude === -2.0 && longitude === -2.0) &&
+                    !(latitude === -3.0 && longitude === -3.0) ) {
+
+                    const latLng = [latitude, longitude];
+                    pathLayer.addLatLng(latLng);
+                    map.setView(latLng, map.getZoom() > 15 ? map.getZoom() : 16); // 移动视图并适当缩放
+
+                    // 更新或创建当前位置标记
+                    if (currentMarker) {
+                        currentMarker.setLatLng(latLng);
+                    } else {
+                        currentMarker = L.marker(latLng).addTo(map)
+                            .bindPopup("当前位置")
+                            .openPopup();
+                    }
+                } else {
+                    console.log("接收到无效或表示错误的位置数据:", data.Location);
+                }
             }
 
-            // 保存历史数据
             dataHistory.push(data);
+            if(dataHistory.length > MAX_DATA_POINTS * 5) { // 限制历史数据大小
+                dataHistory.splice(0, dataHistory.length - MAX_DATA_POINTS * 5);
+            }
         });
 
         // 暂停/恢复实时更新
@@ -136,18 +180,27 @@
 
         // 导出数据
         document.getElementById("exportDataBtn").addEventListener("click", () => {
-            const csvContent = "data:text/csv;charset=utf-8," +
-                ["Timestamp,光强,加速度X,加速度Y,加速度Z,角速度X,角速度Y,角速度Z,经度,纬度"]
-                .concat(dataHistory.map(d => [
-                    d.Timestamp, d.Light,
-                    ...(d.Accelerometer || [null, null, null]),
-                    ...(d.Gyroscope || [null, null, null]),
-                    ...(d.Location || [null, null])
-                ].join(",")))
-                .join("\n");
+            if (dataHistory.length === 0) {
+                alert("没有数据可导出！");
+                return;
+            }
+            const headers = "Timestamp,Latitude,Longitude,AccelerometerX,AccelerometerY,AccelerometerZ,OrientationAzimuth,OrientationPitch,OrientationRoll,Light";
+            const csvRows = dataHistory.map(d => {
+                const loc = d.Location || [null, null];
+                const acc = d.Accelerometer || [null, null, null];
+                const ori = d.Orientation || [null, null, null];
+                return [
+                    d.Timestamp,
+                    loc[0], loc[1], // Latitude, Longitude
+                    acc[0], acc[1], acc[2],
+                    ori[0], ori[1], ori[2],
+                    d.Light
+                ].join(",");
+            });
+            const csvContent = "data:text/csv;charset=utf-8," + [headers, ...csvRows].join("\n");
             const link = document.createElement("a");
             link.href = encodeURI(csvContent);
-            link.download = "sensor_data.csv";
+            link.download = `sensor_data_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.csv`;
             link.click();
         });
     </script>

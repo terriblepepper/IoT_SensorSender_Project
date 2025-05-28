@@ -15,7 +15,7 @@ public class SensorInfoActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_sensor_info);
+        setContentView(R.layout.activity_sensor_info); // 确保 R.layout.activity_sensor_info 是你的主活动布局文件
 
         MaterialToolbar toolbar = findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
@@ -30,20 +30,24 @@ public class SensorInfoActivity extends AppCompatActivity {
         toggle.syncState();
 
         // 默认显示信息面板
-        getSupportFragmentManager().beginTransaction()
-                .replace(R.id.fragment_container, new InfoPanelFragment())
-                .commit();
+        if (savedInstanceState == null) { // 仅在 Activity 首次创建时加载默认 Fragment
+            getSupportFragmentManager().beginTransaction()
+                    .replace(R.id.fragment_container, new InfoPanelFragment())
+                    .commit();
+            navView.setCheckedItem(R.id.nav_info_panel); // 设置导航菜单的默认选中项
+        }
 
         navView.setNavigationItemSelectedListener(item -> {
             Fragment selectedFragment = null;
             int id = item.getItemId();
+
             if (id == R.id.nav_info_panel) {
                 selectedFragment = new InfoPanelFragment();
-            } else if (id == R.id.nav_sensors) {
-                selectedFragment = new SensorsFragment();
             } else if (id == R.id.nav_server) {
                 selectedFragment = new ServerFragment();
             }
+            // SensorsFragment 的导航逻辑已被移除
+
             if (selectedFragment != null) {
                 getSupportFragmentManager().beginTransaction()
                         .replace(R.id.fragment_container, selectedFragment)
@@ -52,6 +56,5 @@ public class SensorInfoActivity extends AppCompatActivity {
             }
             return true;
         });
-
     }
 }
